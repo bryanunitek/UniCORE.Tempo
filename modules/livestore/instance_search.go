@@ -646,7 +646,9 @@ func (i *instance) FindByTraceID(ctx context.Context, traceID []byte, allowParti
 	i.liveTracesMtx.Lock()
 	if liveTrace, ok := i.liveTraces.Traces[util.HashForTraceID(traceID)]; ok {
 		tempTrace := &tempopb.Trace{}
-		tempTrace.ResourceSpans = liveTrace.Batches
+		// Cap the capacity so the combiner's appends reallocate instead of writing
+		// into the live trace's backing array, which the push path keeps appending to.
+		tempTrace.ResourceSpans = liveTrace.Batches[:len(liveTrace.Batches):len(liveTrace.Batches)]
 		// Previously there was some logic here to add inspected bytes in the ingester. But its hard to do with the different
 		// live traces format and feels inaccurate.
 		_, err := combiner.Consume(tempTrace)
@@ -890,7 +892,7 @@ func (i *instance) queryRangeCacheGet(ctx context.Context, m *backend.BlockMeta,
 
 	name := fmt.Sprintf("cache_query_range_%v.buf", hash)
 
-	keyPath := backend.KeyPathForBlock((uuid.UUID)(m.BlockID), m.TenantID)
+	keyPath := backend.KeyPathForBlock(uuid.UUID(m.BlockID), m.TenantID)
 	reader, size, err := i.wal.LocalBackend().Read(ctx, name, keyPath, nil)
 	if err != nil {
 		if errors.Is(err, backend.ErrDoesNotExist) {
@@ -921,7 +923,7 @@ func (i *instance) queryRangeCacheSet(ctx context.Context, m *backend.BlockMeta,
 		return err
 	}
 
-	keyPath := backend.KeyPathForBlock((uuid.UUID)(m.BlockID), m.TenantID)
+	keyPath := backend.KeyPathForBlock(uuid.UUID(m.BlockID), m.TenantID)
 	return i.wal.LocalBackend().Write(ctx, name, keyPath, bytes.NewReader(data), int64(len(data)), nil)
 }
 
